@@ -27,7 +27,7 @@ auction already leaves you worse off than the vendor.
 
 - Works on the whole stack under your mouse, not just one item
 - Uses your real listing price: lowest price minus your undercut (same as Auctionator, percent, fixed or off), minus the AH cut
-- Exact deposit straight from the game while the auction house is open, remembered afterwards
+- Exact deposits of all bag items read automatically when you open the auction house, remembered afterwards
 - Learns the minimum deposit and the deposit rate by itself, so it keeps up with changes
 - Options page under **Options → AddOns → Worth Listing**
 - English and German
@@ -40,14 +40,14 @@ prices are available.
 
 ## Usage
 
-Hover an item in your bags. Open the auction house once and hover your items to let
-the add-on learn the exact deposits.
+Hover an item in your bags. Whenever you open the auction house, the add-on reads the
+exact deposits of all items in your bags, so the tooltip knows them afterwards too.
 
 | Command | Effect |
 |---|---|
 | `/wl` | Open the options page |
 | `/wl status` | Print current settings |
-| `/wl hours <12\|24>` | Auction duration |
+| `/wl hours <hours>` | Auction duration (2, 8 or 24 on WoW Forever) |
 | `/wl min <copper>` | Minimum deposit |
 | `/wl fee <percent>` | Deposit in % of vendor price |
 | `/wl cut <percent>` | AH cut on sale |

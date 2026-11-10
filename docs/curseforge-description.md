@@ -39,7 +39,7 @@ Worth Listing (stack of 11, 24h)
 
 - Calculates the **whole stack**, no more mental math
 - Uses **your real listing price**: undercut the same way as Auctionator, by percent, by a fixed amount, or not at all
-- Takes the **exact deposit** from the game while the auction house is open and remembers it
+- Reads the **exact deposits** of all your bag items automatically when you open the auction house and remembers them
 - **Learns** the minimum deposit and the deposit rate by itself, so it keeps up when Blizzard changes them
 - Options page under **Options → AddOns → Worth Listing**, or type **/wl**
 - **English and German**, more languages welcome
@@ -48,13 +48,13 @@ Worth Listing (stack of 11, 24h)
 
 Prices come from **Auctionator** (recommended); Auctioneer is supported as a fallback. Scan the auction house once so prices are available.
 
-**Tip:** open the auction house once and hover over your bag items. Worth Listing then knows the exact deposits, even after you close the auction house.
+**Tip:** open the auction house once. Worth Listing reads the exact deposits of everything in your bags, so it knows them even after you close the auction house.
 
 ## Commands
 
 - **/wl**: open the options
 - **/wl status**: print the current settings
-- **/wl hours 12** or **/wl hours 24**: auction duration
+- **/wl hours 24**: auction duration (2, 8 or 24 on WoW Forever)
 - **/wl min &lt;copper&gt;**: minimum deposit
 - **/wl reset**: forget saved deposits
 - **/wl on** / **/wl off**: show or hide the tooltip block

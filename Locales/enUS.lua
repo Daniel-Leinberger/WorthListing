@@ -58,9 +58,9 @@ ns.L = {
   OPT_PERCENT = "Percent (in %)",
   OPT_FIXED = "Fixed (copper per item)",
   OPT_ADVANCED = "Advanced: fees",
-  OPT_ADVANCED_HINT = "Worth Listing learns these values by itself whenever you hover items in your bags "
-    .. "while the auction house is open. You normally do not need to change them. Only correct them "
-    .. "if the deposit in the tooltip differs from the one the auction house shows.",
+  OPT_ADVANCED_HINT = "Worth Listing learns these values by itself: whenever you open the auction house, "
+    .. "it reads the exact deposits of all items in your bags. You normally do not need to change them. "
+    .. "Only correct them if the deposit in the tooltip differs from the one the auction house shows.",
   OPT_MIN_DESC = "The lowest deposit the auction house charges, however cheap the item is.",
   OPT_RATE_DESC = "The deposit is this share of the stack's vendor price and grows with the auction "
     .. "duration. Used to estimate the deposit until the add-on has seen the exact amount.",

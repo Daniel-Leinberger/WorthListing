@@ -3,7 +3,7 @@
 -- for the deposit that is lost when the auction does not sell.
 --
 -- Deposit:
---   AH open   -> exact value from the game, saved for later
+--   AH open   -> exact value from the game for every bag item and duration, saved for later
 --   AH closed -> saved value, otherwise estimate: max(minimum, vendor price * rate)
 --   Minimum and rate are learned from every exact value.
 
@@ -65,6 +65,8 @@ local GetBagCount = (C_Container and C_Container.GetContainerItemInfo)
     return info and info.stackCount
   end
   or function(bag, slot) return select(2, GetContainerItemInfo(bag, slot)) end
+local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+local LAST_BAG = NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 -- backpack is bag 0
 
 local ahOpen = false
 
@@ -122,8 +124,8 @@ function ns.UndercutText()
 end
 
 -- Exact deposit from the game (only works while the auction house is open)
-local function QueryDeposit(bag, slot, itemID, count)
-  local duration = DURATION_INDEX[WorthListingDB.hours]
+local function QueryDeposit(bag, slot, itemID, count, hours)
+  local duration = DURATION_INDEX[hours]
   if not ahOpen or not duration or not C_AuctionHouse or not ItemLocation then return end
   local ok, deposit = pcall(function()
     local location = ItemLocation:CreateFromBagAndSlot(bag, slot)
@@ -136,33 +138,65 @@ local function QueryDeposit(bag, slot, itemID, count)
   if ok and type(deposit) == "number" then return deposit end
 end
 
--- Learn the minimum or the rate from an exact value
-local function Learn(deposit, vendor)
+-- Learn the minimum or the rate of a duration from an exact value
+local function Learn(deposit, vendor, hours)
   local db = WorthListingDB
   if deposit < db.min then
     db.min = deposit
   elseif deposit > db.min and vendor > 0 then
-    db.rates[db.hours] = PercentShare(deposit, vendor)
+    db.rates[hours] = PercentShare(deposit, vendor)
   end
+end
+
+local function DepositKey(itemID, count, hours)
+  return ("%d:%d:%d"):format(itemID, count, hours)
+end
+
+-- Asks the game for the exact deposit, saves it and learns from it; nil if not available
+local function RecordDeposit(bag, slot, itemID, vendor, count, hours)
+  local exact = QueryDeposit(bag, slot, itemID, count, hours)
+  if exact then
+    WorthListingDB.deposits[DepositKey(itemID, count, hours)] = exact
+    Learn(exact, vendor, hours)
+  end
+  return exact
+end
+
+local function ItemID(link)
+  return tonumber(link:match("item:(%d+)"))
 end
 
 -- Deposit and where it came from
 local function GetDeposit(bag, slot, link, vendor, count)
   local db = WorthListingDB
-  local itemID = tonumber(link:match("item:(%d+)"))
-  local key = ("%s:%d:%d"):format(itemID or link, count, db.hours)
-
-  local exact = itemID and QueryDeposit(bag, slot, itemID, count)
-  if exact then
-    db.deposits[key] = exact
-    Learn(exact, vendor)
-    return exact, L.SOURCE_LIVE
-  end
-  if db.deposits[key] then
-    return db.deposits[key], L.SOURCE_SAVED
+  local itemID = ItemID(link)
+  if itemID then
+    local exact = RecordDeposit(bag, slot, itemID, vendor, count, db.hours)
+    if exact then return exact, L.SOURCE_LIVE end
+    local saved = db.deposits[DepositKey(itemID, count, db.hours)]
+    if saved then return saved, L.SOURCE_SAVED end
   end
   local estimate = math.floor(PercentOf(vendor, db.rates[db.hours] or 0))
   return math.max(db.min, estimate), L.SOURCE_ESTIMATED
+end
+
+-- Reads the exact deposits of every sellable bag item for all durations,
+-- so the tooltip knows them without hovering each item first
+local function ScanBags()
+  if not ahOpen then return end
+  for bag = 0, LAST_BAG do
+    for slot = 1, GetNumSlots(bag) or 0 do
+      local link = GetBagLink(bag, slot)
+      local itemID = link and ItemID(link)
+      local sellPrice = itemID and select(11, GetInfo(link))
+      if sellPrice and sellPrice > 0 then
+        local count = math.max(1, GetBagCount(bag, slot) or 1)
+        for _, hours in ipairs(DURATIONS) do
+          RecordDeposit(bag, slot, itemID, sellPrice * count, count, hours)
+        end
+      end
+    end
+  end
 end
 
 local ZERO = "0|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:2:0|t"
@@ -309,12 +343,16 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("AUCTION_HOUSE_SHOW")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
+frame:RegisterEvent("BAG_UPDATE_DELAYED")
 frame:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" and name == ADDON then
     InitDB()
     if ns.BuildOptions then ns.BuildOptions() end
   elseif event == "AUCTION_HOUSE_SHOW" or event == "AUCTION_HOUSE_CLOSED" then
     ahOpen = event == "AUCTION_HOUSE_SHOW"
+    ScanBags()
+  elseif event == "BAG_UPDATE_DELAYED" then
+    ScanBags() -- only does something while the auction house is open
   end
 end)
 
