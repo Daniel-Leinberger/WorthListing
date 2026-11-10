@@ -12,6 +12,8 @@ local BUTTON_HEIGHT = 22
 local BUTTON_PADDING = 24  -- text width + padding = button width
 local BOX_HEIGHT = 20
 local SCROLLBAR_SPACE = 28 -- room on the right for the scroll bar
+local TEXT_WIDTH = 520     -- explanations wrap at this width
+local GAP_SECTION = -28    -- before a new section heading
 
 local page, content, scroll, category
 local widgets = {}
@@ -79,6 +81,22 @@ local function NumberBox(anchor, width, key)
   return box
 end
 
+-- Small grey explanation that wraps
+local function Description(text, anchor, y)
+  local fs = Label(text, anchor, y or -4, "GameFontDisableSmall")
+  fs:SetWidth(TEXT_WIDTH)
+  fs:SetWordWrap(true)
+  return fs
+end
+
+-- Heading, explanation and number box for one setting; returns heading and explanation
+local function Field(anchor, y, heading, description, key)
+  local label = Label(heading, anchor, y)
+  local desc = Description(description, label)
+  widgets[key] = NumberBox(desc, 80, key)
+  return label, desc
+end
+
 -- Button that grows with its text, so longer translations fit
 local function Button(text, minWidth, onClick)
   local b = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
@@ -141,20 +159,8 @@ local function Build()
   local firstHour
   widgets.hours, firstHour = ButtonRow(hoursLabel, hourEntries, ns.SetHours)
 
-  -- Deposit
-  local minLabel = Label(L.OPT_MIN, firstHour, -18)
-  widgets.min = NumberBox(minLabel, 80, "min")
-  widgets.minMoney = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-  widgets.minMoney:SetPoint("LEFT", widgets.min, "RIGHT", 10, 0)
-
-  widgets.rateLabel = Label("", minLabel, GAP_FIELD)
-  widgets.rate = NumberBox(widgets.rateLabel, 80, "rate")
-
-  local cutLabel = Label(L.OPT_CUT, widgets.rateLabel, GAP_FIELD)
-  widgets.cut = NumberBox(cutLabel, 80, "cut")
-
   -- Undercut
-  local undercutLabel = Label(L.OPT_UNDERCUT, cutLabel, GAP_FIELD)
+  local undercutLabel = Label(L.OPT_UNDERCUT, firstHour, -18)
   local firstMode
   widgets.modes, firstMode = ButtonRow(undercutLabel, {
     { "auctionator", L.MODE_AUCTIONATOR, 120 },
@@ -170,10 +176,20 @@ local function Build()
   fixedLabel:SetText(L.OPT_FIXED)
   widgets.undercutFixed = NumberBox(fixedLabel, 60, "undercutFixed")
 
-  local hint = Label(L.OPT_HINT, percentLabel, GAP_FIELD, "GameFontDisableSmall")
+  -- Advanced: fees (learned automatically, normally left alone)
+  local advanced = Label(L.OPT_ADVANCED, percentLabel, GAP_FIELD + GAP_SECTION, "GameFontNormalLarge")
+  local advancedHint = Description(L.OPT_ADVANCED_HINT, advanced, -6)
+
+  local _, minDesc = Field(advancedHint, GAP_ROW, L.OPT_MIN, L.OPT_MIN_DESC, "min")
+  widgets.minMoney = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  widgets.minMoney:SetPoint("LEFT", widgets.min, "RIGHT", 10, 0)
+
+  local rateDesc
+  widgets.rateLabel, rateDesc = Field(minDesc, GAP_FIELD, "", L.OPT_RATE_DESC, "rate")
+  local _, cutDesc = Field(rateDesc, GAP_FIELD, L.OPT_CUT, L.OPT_CUT_DESC, "cut")
 
   -- Current state
-  local statusTitle = Label(L.OPT_STATUS, hint, -20)
+  local statusTitle = Label(L.OPT_STATUS, cutDesc, GAP_FIELD + GAP_SECTION)
   widgets.status = Label("", statusTitle, -8, "GameFontHighlight")
   widgets.status:SetSpacing(4)
 

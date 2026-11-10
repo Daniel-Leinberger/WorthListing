@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.1.0
+
+- Options page reorganized: everyday settings (duration, undercut) first, fee settings below in a new "Advanced: fees" section
+- Every fee setting now explains what it means and when you should change it
+
 ## v1.0.2
 
 - Values from chat commands are now checked the same way as on the options page (e.g. AH cut at most 99 %, no negative amounts)

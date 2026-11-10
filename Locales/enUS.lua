@@ -57,8 +57,14 @@ ns.L = {
   MODE_NONE = "Off",
   OPT_PERCENT = "Percent (in %)",
   OPT_FIXED = "Fixed (copper per item)",
-  OPT_HINT = "The add-on learns the minimum and the deposit rate by itself whenever you hover\n"
-    .. "items in your bags while the auction house is open. The fields are only for corrections.",
+  OPT_ADVANCED = "Advanced: fees",
+  OPT_ADVANCED_HINT = "Worth Listing learns these values by itself whenever you hover items in your bags "
+    .. "while the auction house is open. You normally do not need to change them. Only correct them "
+    .. "if the deposit in the tooltip differs from the one the auction house shows.",
+  OPT_MIN_DESC = "The lowest deposit the auction house charges, however cheap the item is.",
+  OPT_RATE_DESC = "The deposit is this share of the stack's vendor price and grows with the auction "
+    .. "duration. Used to estimate the deposit until the add-on has seen the exact amount.",
+  OPT_CUT_DESC = "The share of the sale price the auction house keeps when your auction sells.",
   OPT_STATUS = "Current state",
   STATUS_DURATION = "Duration: |cffffffff%dh|r",
   STATUS_MIN = "Minimum deposit: %s",
