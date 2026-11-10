@@ -9,21 +9,30 @@
 
 local ADDON, ns = ...
 local L = ns.L
-local DB_VERSION = 2
+local DB_VERSION = 3
+
+-- The game numbers auction durations 1, 2, 3. What they mean depends on the client:
+-- WoW Forever (interface 16000-19999) uses 2/8/24 hours, retail-style clients 12/24/48.
+local interface = select(4, GetBuildInfo()) or 0
+local IS_FOREVER = interface >= 16000 and interface < 20000
+local DURATIONS = IS_FOREVER and { 2, 8, 24 } or { 12, 24, 48 }
+local DEFAULT_RATES = IS_FOREVER and { [2] = 5, [8] = 20, [24] = 60 }
+  or { [12] = 15, [24] = 30, [48] = 60 }
+
+local DURATION_INDEX = {}
+for index, hours in ipairs(DURATIONS) do DURATION_INDEX[hours] = index end
 
 local defaults = {
   cut = 5,       -- share the AH keeps on sale, in %
   hours = 24,    -- auction duration
   min = 100,     -- minimum deposit in copper
-  rates = { [12] = 15, [24] = 30, [48] = 60 }, -- deposit in % of vendor price per duration
+  rates = DEFAULT_RATES, -- deposit in % of vendor price per duration
   deposits = {}, -- saved exact deposits: "itemID:count:hours" -> copper
   undercutMode = "auctionator", -- "auctionator", "percent", "fixed" or "none"
   undercutPercent = 5,          -- undercut by x % (mode "percent")
   undercutFixed = 1,            -- undercut by x copper per item (mode "fixed")
   show = true,
 }
-
-local DURATION_INDEX = { [12] = 1, [24] = 2, [48] = 3 }
 
 local GetInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
 
@@ -228,10 +237,19 @@ local function InitDB()
     WorthListingDB.hours = nil
     WorthListingDB.rate = nil
   end
+  if (WorthListingDB.version or 1) < 3 then
+    -- Up to version 2, Forever deposits were queried for 8h instead of 24h:
+    -- saved deposits and learned rates are wrong
+    WorthListingDB.deposits = nil
+    WorthListingDB.rates = nil
+  end
   for k, v in pairs(defaults) do
     if WorthListingDB[k] == nil then
       WorthListingDB[k] = type(v) == "table" and CopyTable(v) or v
     end
+  end
+  if not DURATION_INDEX[WorthListingDB.hours] then
+    WorthListingDB.hours = defaults.hours
   end
   WorthListingDB.version = DB_VERSION
 end
@@ -243,7 +261,7 @@ local function ResetLearned()
 end
 
 ns.defaults = defaults
-ns.DURATION_INDEX = DURATION_INDEX
+ns.DURATIONS = DURATIONS
 ns.ResetLearned = ResetLearned
 
 local frame = CreateFrame("Frame")
@@ -298,6 +316,6 @@ SlashCmdList.WORTHLISTING = function(input)
     local rate = WorthListingDB.rates[WorthListingDB.hours] or 0
     Print(L.CHAT_STATUS:format(WorthListingDB.hours, rate, Money(WorthListingDB.min), WorthListingDB.cut))
     Print(L.CHAT_UNDERCUT:format(ns.UndercutText()))
-    Print(L.CHAT_HELP:format(SLASH_WORTHLISTING2))
+    Print(L.CHAT_HELP:format(SLASH_WORTHLISTING2, table.concat(DURATIONS, "|")))
   end
 end

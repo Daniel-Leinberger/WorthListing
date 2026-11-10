@@ -95,7 +95,7 @@ local function Build()
   local hoursLabel = Label(L.OPT_DURATION, show, 4, -14)
   widgets.hours = {}
   local prev
-  for _, hours in ipairs({ 12, 24 }) do
+  for _, hours in ipairs(ns.DURATIONS) do
     local b = Button(hours .. "h", 60, function() WorthListingDB.hours = hours end)
     if prev then
       b:SetPoint("LEFT", prev, "RIGHT", 6, 0)
@@ -107,7 +107,7 @@ local function Build()
   end
 
   -- Minimum deposit
-  local minLabel = Label(L.OPT_MIN, widgets.hours[12], 0, -18)
+  local minLabel = Label(L.OPT_MIN, widgets.hours[ns.DURATIONS[1]], 0, -18)
   widgets.min = NumberBox(minLabel, 80, function(num) WorthListingDB.min = math.floor(num) end)
   widgets.minMoney = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   widgets.minMoney:SetPoint("LEFT", widgets.min, "RIGHT", 10, 0)

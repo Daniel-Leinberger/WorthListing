@@ -37,7 +37,7 @@ L.CHAT_SHOW_ON = "Tooltip an"
 L.CHAT_SHOW_OFF = "Tooltip aus"
 L.CHAT_STATUS = "Laufzeit %dh, Gebühr %.1f %% (mind. %s), AH-Anteil %s %%"
 L.CHAT_UNDERCUT = "Unterbieten: %s"
-L.CHAT_HELP = "%s (Optionen)  |  status  |  stunden <12|24>  |  min <Kupfer>  |  gebuehr <Prozent>  |  anteil <Prozent>  |  reset  |  an  |  aus"
+L.CHAT_HELP = "%s (Optionen)  |  status  |  stunden <%s>  |  min <Kupfer>  |  gebuehr <Prozent>  |  anteil <Prozent>  |  reset  |  an  |  aus"
 
 -- Options page
 L.OPT_SUBTITLE = "Zeigt im Tooltip, ob sich ein Stack im Auktionshaus lohnt."

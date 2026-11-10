@@ -41,7 +41,7 @@ ns.L = {
   CHAT_SHOW_OFF = "Tooltip off",
   CHAT_STATUS = "Duration %dh, deposit %.1f %% (min. %s), AH cut %s %%",
   CHAT_UNDERCUT = "Undercut: %s",
-  CHAT_HELP = "%s (options)  |  status  |  hours <12|24>  |  min <copper>  |  fee <percent>  |  cut <percent>  |  reset  |  on  |  off",
+  CHAT_HELP = "%s (options)  |  status  |  hours <%s>  |  min <copper>  |  fee <percent>  |  cut <percent>  |  reset  |  on  |  off",
 
   -- Options page
   OPT_SUBTITLE = "Shows in the tooltip whether a stack is worth listing at the auction house.",
