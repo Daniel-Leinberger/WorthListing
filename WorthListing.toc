@@ -1,0 +1,13 @@
+## Interface: 16001
+## Title: Worth Listing
+## Notes: Shows in the tooltip whether a stack is worth listing at the auction house (incl. deposit and AH cut).
+## Notes-deDE: Zeigt im Tooltip, ob sich der Stack im Auktionshaus lohnt (inkl. Einstellgebühr und AH-Anteil).
+## Author: Daniel-Leinberger
+## Version: @project-version@
+## SavedVariables: WorthListingDB
+## OptionalDeps: Auctionator, Auc-Advanced
+
+Locales\enUS.lua
+Locales\deDE.lua
+WorthListing.lua
+Options.lua

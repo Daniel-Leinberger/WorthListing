@@ -1,0 +1,5 @@
+# Local backup of an Auctionator file, not part of this add-on
+docs/ItemPrice.lua.original-auctionator
+
+# Packager output
+.release/
