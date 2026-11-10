@@ -231,16 +231,16 @@ local function Line(tt, left, right, color)
   tt:AddDoubleLine(INDENT .. left, right, lr, lg, lb, r, g, b)
 end
 
-local function AddLines(tt, bag, slot)
+-- Adds the block for `count` items of `link`; bag/slot is one place the item lies in
+-- (needed to ask the game for the exact deposit)
+local function AddLines(tt, link, count, bag, slot)
   local db = WorthListingDB
-  if not db or not db.show then return end
-  local link = GetBagLink(bag, slot)
-  if not link then return end
+  if not db or not db.show or not link then return end
   local market = GetMarketPrice(link)
   -- Item data not loaded yet: show nothing rather than wrong numbers
   local sellPrice = select(11, GetInfo(link))
   if not market or not sellPrice then return end
-  local count = math.max(1, GetBagCount(bag, slot) or 1)
+  count = math.max(1, count or 1)
 
   local vendor = sellPrice * count
   local deposit, source = GetDeposit(bag, slot, link, vendor, count)
@@ -269,17 +269,34 @@ local function AddLines(tt, bag, slot)
   tt:Show()
 end
 
+local function OnBagItem(tt, bag, slot)
+  AddLines(tt, GetBagLink(bag, slot), GetBagCount(bag, slot), bag, slot)
+end
+
+-- Auctionator's selling list shows its items via SetHyperlink. Its item buttons carry
+-- the link, the total count in your bags and the bag locations; other links (chat etc.)
+-- have no stack to calculate with and are ignored.
+local function OnLinkItem(tt)
+  local owner = tt:GetOwner()
+  local item = owner and owner.itemInfo
+  local location = type(item) == "table" and type(item.locations) == "table" and item.locations[1]
+  if not location or not item.itemLink then return end
+  local ok, bag, slot = pcall(location.GetBagAndSlot, location)
+  if ok and bag then AddLines(tt, item.itemLink, item.itemCount, bag, slot) end
+end
+
 if TooltipDataProcessor and C_TooltipInfo then
   -- Modern tooltip path: also survives the tooltip being rebuilt
+  local HANDLERS = { GetBagItem = OnBagItem, GetHyperlink = OnLinkItem }
   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tt)
     if tt ~= GameTooltip then return end
     local info = tt.info or tt.processingInfo
-    if info and info.getterName == "GetBagItem" and info.getterArgs and not info.excludeLines then
-      AddLines(tt, unpack(info.getterArgs))
-    end
+    local handler = info and not info.excludeLines and HANDLERS[info.getterName]
+    if handler then handler(tt, unpack(info.getterArgs or {})) end
   end)
 else
-  hooksecurefunc(GameTooltip, "SetBagItem", AddLines)
+  hooksecurefunc(GameTooltip, "SetBagItem", OnBagItem)
+  hooksecurefunc(GameTooltip, "SetHyperlink", OnLinkItem)
 end
 
 -- Settings ------------------------------------------------------------------

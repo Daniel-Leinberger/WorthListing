@@ -5,6 +5,7 @@
 - Options page reorganized: everyday settings (duration, undercut) first, fee settings below in a new "Advanced: fees" section
 - Every fee setting now explains what it means and when you should change it
 - Opening the auction house now reads the exact deposits of all bag items for every duration, no need to hover each item; bag changes while it is open are picked up too
+- The tooltip block now also shows in Auctionator's selling list, for the total amount Auctionator would post
 
 ## v1.0.2
 

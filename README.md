@@ -25,7 +25,7 @@ auction already leaves you worse off than the vendor.
 
 ## Features
 
-- Works on the whole stack under your mouse, not just one item
+- Works on the whole stack under your mouse, not just one item, in your bags and in Auctionator's selling list
 - Uses your real listing price: lowest price minus your undercut (same as Auctionator, percent, fixed or off), minus the AH cut
 - Exact deposits of all bag items read automatically when you open the auction house, remembered afterwards
 - Learns the minimum deposit and the deposit rate by itself, so it keeps up with changes
