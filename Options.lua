@@ -11,8 +11,9 @@ local GAP_FIELD = -40      -- label of the next number field (leaves room for th
 local BUTTON_HEIGHT = 22
 local BUTTON_PADDING = 24  -- text width + padding = button width
 local BOX_HEIGHT = 20
+local SCROLLBAR_SPACE = 28 -- room on the right for the scroll bar
 
-local page, category
+local page, content, scroll, category
 local widgets = {}
 
 local function Refresh()
@@ -43,8 +44,19 @@ local function Refresh()
   }, "\n"))
 end
 
+-- Fits the content frame to its widgets and shows the scroll bar only when needed
+local function UpdateScroll()
+  local top, bottom = content:GetTop(), widgets.last:GetBottom()
+  if not top or not bottom then return end
+  content:SetWidth(scroll:GetWidth())
+  content:SetHeight(top - bottom + MARGIN)
+  local needed = content:GetHeight() > scroll:GetHeight()
+  if scroll.ScrollBar then scroll.ScrollBar:SetShown(needed) end
+  if not needed then scroll:SetVerticalScroll(0) end
+end
+
 local function Label(text, anchor, y, font, x)
-  local fs = page:CreateFontString(nil, "ARTWORK", font or "GameFontNormal")
+  local fs = content:CreateFontString(nil, "ARTWORK", font or "GameFontNormal")
   fs:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", x or 0, y or GAP_ROW)
   fs:SetJustifyH("LEFT")
   fs:SetText(text)
@@ -53,7 +65,7 @@ end
 
 -- Number field for one setting (see ns.Set); takes the value on Enter or when it loses focus
 local function NumberBox(anchor, width, key)
-  local box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
+  local box = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
   box:SetSize(width, BOX_HEIGHT)
   box:SetAutoFocus(false)
   box:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", -GAP_SMALL, GAP_SMALL)
@@ -69,7 +81,7 @@ end
 
 -- Button that grows with its text, so longer translations fit
 local function Button(text, minWidth, onClick)
-  local b = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
+  local b = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   b:SetText(text)
   local textWidth = b.GetTextWidth and b:GetTextWidth() or 0
   b:SetSize(math.max(minWidth, textWidth + BUTTON_PADDING), BUTTON_HEIGHT)
@@ -99,16 +111,25 @@ local function Build()
   page = CreateFrame("Frame", "WorthListingOptionsPage", UIParent)
   page:Hide()
 
-  local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+  -- Everything sits in a scroll frame; the scroll bar only shows when the content is taller than the page
+  scroll = CreateFrame("ScrollFrame", nil, page, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 0, -4)
+  scroll:SetPoint("BOTTOMRIGHT", -SCROLLBAR_SPACE, 4)
+  scroll.scrollBarHideable = true
+  content = CreateFrame("Frame", nil, scroll)
+  content:SetSize(1, 1)
+  scroll:SetScrollChild(content)
+
+  local title = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", MARGIN, -MARGIN)
   title:SetText(ns.TITLE)
   local sub = Label(L.OPT_SUBTITLE, title, -8, "GameFontHighlightSmall")
 
   -- Show in tooltip
-  local show = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
+  local show = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
   show:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", -4, -14)
   show:SetScript("OnClick", function(self) WorthListingDB.show = self:GetChecked() and true or false end)
-  local showText = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  local showText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   showText:SetPoint("LEFT", show, "RIGHT", 4, 0)
   showText:SetText(L.OPT_SHOW)
   widgets.show = show
@@ -123,7 +144,7 @@ local function Build()
   -- Deposit
   local minLabel = Label(L.OPT_MIN, firstHour, -18)
   widgets.min = NumberBox(minLabel, 80, "min")
-  widgets.minMoney = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  widgets.minMoney = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   widgets.minMoney:SetPoint("LEFT", widgets.min, "RIGHT", 10, 0)
 
   widgets.rateLabel = Label("", minLabel, GAP_FIELD)
@@ -144,7 +165,7 @@ local function Build()
 
   local percentLabel = Label(L.OPT_PERCENT, firstMode, -12, "GameFontHighlightSmall")
   widgets.undercutPercent = NumberBox(percentLabel, 60, "undercutPercent")
-  local fixedLabel = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  local fixedLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   fixedLabel:SetPoint("LEFT", percentLabel, "LEFT", 160, 0)
   fixedLabel:SetText(L.OPT_FIXED)
   widgets.undercutFixed = NumberBox(fixedLabel, 60, "undercutFixed")
@@ -158,8 +179,15 @@ local function Build()
 
   local reset = Button(L.OPT_RESET, 240, ns.ResetLearned)
   reset:SetPoint("TOPLEFT", widgets.status, "BOTTOMLEFT", 0, GAP_ROW)
+  widgets.last = reset
 
-  page:SetScript("OnShow", Refresh)
+  page:SetScript("OnShow", function()
+    Refresh()
+    UpdateScroll()
+    -- positions are only known after the first layout pass
+    if C_Timer then C_Timer.After(0, UpdateScroll) end
+  end)
+  scroll:SetScript("OnSizeChanged", UpdateScroll)
   page.OnCommit = function() end
   page.OnRefresh = Refresh
   page.OnDefault = function() ns.ResetAll() Refresh() end

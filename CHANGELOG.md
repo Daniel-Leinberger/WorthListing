@@ -8,6 +8,7 @@
 - Values from chat commands are now checked the same way as on the options page (e.g. AH cut at most 99 %, no negative amounts)
 - Shows nothing instead of wrong numbers while item data is still loading
 - "Defaults" on the options page now resets every setting
+- Options page scrolls when it does not fit; the scroll bar only appears when needed
 
 ## v1.0.0
 
