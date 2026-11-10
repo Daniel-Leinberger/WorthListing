@@ -1,6 +1,7 @@
 # Packages the add-on and uploads it to CurseForge and GitHub Releases
 # whenever a version tag (e.g. v1.0.0) is pushed.
 # Needs the repository secret CF_API_KEY and "## X-Curse-Project-ID" in the .toc.
+# Tag names are case-sensitive: use a lowercase "v" (v1.0.0, not V1.0.0).
 
 name: Release
 
