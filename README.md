@@ -1,5 +1,7 @@
 # Worth Listing
 
+![AI: Used](https://img.shields.io/badge/AI-USED-orange)
+
 A World of Warcraft add-on that answers one question right in the item tooltip:
 **is this stack worth listing at the auction house, or should I just sell it to a vendor?**
 

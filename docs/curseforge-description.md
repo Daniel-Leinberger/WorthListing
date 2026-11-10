@@ -8,6 +8,8 @@ Shows in the tooltip whether a stack is worth listing at the auction house, afte
 
 # Worth Listing
 
+![AI: Used](https://img.shields.io/badge/AI-USED-orange)
+
 **Is this stack worth listing, or should I just vendor it?**
 
 You know the feeling: the auction house shows a slightly higher price than the vendor, you list the item, someone undercuts you, the auction expires, and your deposit is gone. Do that twice and you would have been better off at the vendor.
