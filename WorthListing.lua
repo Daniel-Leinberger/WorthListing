@@ -11,10 +11,15 @@ local ADDON, ns = ...
 local L = ns.L
 local DB_VERSION = 3
 
+local COPPER_PER_SILVER = COPPER_PER_SILVER or 100
+local MAX_PERCENT = 99   -- upper limit for AH cut and undercut, keeps proceeds positive
+local SAFE_FAILS = 3     -- break-even from this many failed attempts on is shown green
+
 -- The game numbers auction durations 1, 2, 3. What they mean depends on the client:
--- WoW Forever (interface 16000-19999) uses 2/8/24 hours, retail-style clients 12/24/48.
+-- WoW Forever uses 2/8/24 hours, retail-style clients 12/24/48.
+local FOREVER_INTERFACE_FIRST, FOREVER_INTERFACE_LAST = 16000, 19999
 local interface = select(4, GetBuildInfo()) or 0
-local IS_FOREVER = interface >= 16000 and interface < 20000
+local IS_FOREVER = interface >= FOREVER_INTERFACE_FIRST and interface <= FOREVER_INTERFACE_LAST
 local DURATIONS = IS_FOREVER and { 2, 8, 24 } or { 12, 24, 48 }
 local DEFAULT_RATES = IS_FOREVER and { [2] = 5, [8] = 20, [24] = 60 }
   or { [12] = 15, [24] = 30, [48] = 60 }
@@ -23,48 +28,59 @@ local DURATION_INDEX = {}
 for index, hours in ipairs(DURATIONS) do DURATION_INDEX[hours] = index end
 
 local defaults = {
-  cut = 5,       -- share the AH keeps on sale, in %
-  hours = 24,    -- auction duration
-  min = 100,     -- minimum deposit in copper
-  rates = DEFAULT_RATES, -- deposit in % of vendor price per duration
-  deposits = {}, -- saved exact deposits: "itemID:count:hours" -> copper
+  cut = 5,                      -- share the AH keeps on sale, in %
+  hours = 24,                   -- auction duration
+  min = COPPER_PER_SILVER,      -- minimum deposit in copper
+  rates = DEFAULT_RATES,        -- deposit in % of vendor price per duration
+  deposits = {},                -- saved exact deposits: "itemID:count:hours" -> copper
   undercutMode = "auctionator", -- "auctionator", "percent", "fixed" or "none"
   undercutPercent = 5,          -- undercut by x % (mode "percent")
   undercutFixed = 1,            -- undercut by x copper per item (mode "fixed")
   show = true,
 }
 
-local GetInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+-- Allowed range for every number the player can set (chat and options page)
+local LIMITS = {
+  min = { 0, math.huge, true },        -- { lowest, highest, whole numbers only }
+  rate = { 0, math.huge },
+  cut = { 0, MAX_PERCENT },
+  undercutPercent = { 0, MAX_PERCENT },
+  undercutFixed = { 0, math.huge, true },
+}
 
-local ahOpen = false
-
-local function GetBagLink(bag, slot)
-  if C_Container and C_Container.GetContainerItemLink then
-    return C_Container.GetContainerItemLink(bag, slot)
-  end
-  return GetContainerItemLink(bag, slot)
+local function PercentOf(value, percent)
+  return value * percent / 100
 end
 
-local function GetBagCount(bag, slot)
-  if C_Container and C_Container.GetContainerItemInfo then
+local function PercentShare(part, whole)
+  return part * 100 / whole
+end
+
+-- Pick the client's API once instead of on every tooltip
+local GetInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+local GetBagLink = (C_Container and C_Container.GetContainerItemLink) or GetContainerItemLink
+local GetBagCount = (C_Container and C_Container.GetContainerItemInfo)
+  and function(bag, slot)
     local info = C_Container.GetContainerItemInfo(bag, slot)
     return info and info.stackCount
   end
-  local _, count = GetContainerItemInfo(bag, slot)
-  return count
+  or function(bag, slot) return select(2, GetContainerItemInfo(bag, slot)) end
+
+local ahOpen = false
+
+-- Calls a price add-on safely; returns a positive price or nil
+local function TryPrice(fn, ...)
+  if not fn then return end
+  local ok, value = pcall(fn, ...)
+  if ok and type(value) == "number" and value > 0 then return value end
 end
 
 -- Market value per item: Auctionator first, then Auctioneer
 local function GetMarketPrice(link)
-  if Auctionator and Auctionator.API and Auctionator.API.v1
-     and Auctionator.API.v1.GetAuctionPriceByItemLink then
-    local ok, value = pcall(Auctionator.API.v1.GetAuctionPriceByItemLink, ADDON, link)
-    if ok and value and value > 0 then return value end
-  end
-  if AucAdvanced and AucAdvanced.API and AucAdvanced.API.GetMarketValue then
-    local ok, value = pcall(AucAdvanced.API.GetMarketValue, link)
-    if ok and value and value > 0 then return value end
-  end
+  local auctionator = Auctionator and Auctionator.API and Auctionator.API.v1
+  local auctioneer = AucAdvanced and AucAdvanced.API
+  return TryPrice(auctionator and auctionator.GetAuctionPriceByItemLink, ADDON, link)
+    or TryPrice(auctioneer and auctioneer.GetMarketValue, link)
 end
 
 -- Our listing price per item: lowest price minus undercut
@@ -72,12 +88,13 @@ local function GetListingPrice(market)
   local db = WorthListingDB
   local price
   if db.undercutMode == "auctionator" then
-    if Auctionator and Auctionator.Selling and Auctionator.Selling.CalculateItemPriceFromPrice then
-      local ok, value = pcall(Auctionator.Selling.CalculateItemPriceFromPrice, market)
+    local selling = Auctionator and Auctionator.Selling
+    if selling and selling.CalculateItemPriceFromPrice then
+      local ok, value = pcall(selling.CalculateItemPriceFromPrice, market)
       if ok and type(value) == "number" then price = value end
     end
   elseif db.undercutMode == "percent" then
-    price = market * (100 - db.undercutPercent) / 100
+    price = market - PercentOf(market, db.undercutPercent)
   elseif db.undercutMode == "fixed" then
     price = market - db.undercutFixed
   end
@@ -106,9 +123,8 @@ end
 
 -- Exact deposit from the game (only works while the auction house is open)
 local function QueryDeposit(bag, slot, itemID, count)
-  if not ahOpen or not C_AuctionHouse or not ItemLocation then return end
   local duration = DURATION_INDEX[WorthListingDB.hours]
-  if not duration then return end
+  if not ahOpen or not duration or not C_AuctionHouse or not ItemLocation then return end
   local ok, deposit = pcall(function()
     local location = ItemLocation:CreateFromBagAndSlot(bag, slot)
     if not C_Item.DoesItemExist(location) then return end
@@ -121,31 +137,32 @@ local function QueryDeposit(bag, slot, itemID, count)
 end
 
 -- Learn the minimum or the rate from an exact value
-local function Learn(deposit, raw)
-  if deposit < WorthListingDB.min then
-    WorthListingDB.min = deposit
-  elseif deposit > WorthListingDB.min and raw > 0 then
-    WorthListingDB.rates[WorthListingDB.hours] = deposit * 100 / raw
+local function Learn(deposit, vendor)
+  local db = WorthListingDB
+  if deposit < db.min then
+    db.min = deposit
+  elseif deposit > db.min and vendor > 0 then
+    db.rates[db.hours] = PercentShare(deposit, vendor)
   end
 end
 
 -- Deposit and where it came from
-local function GetDeposit(bag, slot, link, sellPrice, count)
+local function GetDeposit(bag, slot, link, vendor, count)
+  local db = WorthListingDB
   local itemID = tonumber(link:match("item:(%d+)"))
-  local key = ("%s:%d:%d"):format(itemID or link, count, WorthListingDB.hours)
-  local raw = sellPrice * count
+  local key = ("%s:%d:%d"):format(itemID or link, count, db.hours)
 
   local exact = itemID and QueryDeposit(bag, slot, itemID, count)
   if exact then
-    WorthListingDB.deposits[key] = exact
-    Learn(exact, raw)
+    db.deposits[key] = exact
+    Learn(exact, vendor)
     return exact, L.SOURCE_LIVE
   end
-  if WorthListingDB.deposits[key] then
-    return WorthListingDB.deposits[key], L.SOURCE_SAVED
+  if db.deposits[key] then
+    return db.deposits[key], L.SOURCE_SAVED
   end
-  local rate = WorthListingDB.rates[WorthListingDB.hours] or 0
-  return math.max(WorthListingDB.min, math.floor(raw * rate / 100)), L.SOURCE_ESTIMATED
+  local estimate = math.floor(PercentOf(vendor, db.rates[db.hours] or 0))
+  return math.max(db.min, estimate), L.SOURCE_ESTIMATED
 end
 
 local ZERO = "0|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:2:0|t"
@@ -164,54 +181,55 @@ local function Money(copper, signed)
 end
 ns.Money = Money
 
-local GREEN, RED, YELLOW, GREY, WHITE = { 0.2, 1, 0.2 }, { 1, 0.3, 0.3 }, { 1, 0.82, 0 }, { 0.7, 0.7, 0.7 }, { 1, 1, 1 }
+local COLOR = {
+  good = { 0.2, 1, 0.2 },
+  bad = { 1, 0.3, 0.3 },
+  warn = { 1, 0.82, 0 },
+  muted = { 0.7, 0.7, 0.7 },
+  value = { 1, 1, 1 },
+  label = { 0.8, 0.8, 0.8 },
+}
+local INDENT = "  "
 
 local function Line(tt, left, right, color)
-  local r, g, b = unpack(color or WHITE)
-  tt:AddDoubleLine("  " .. left, right, 0.8, 0.8, 0.8, r, g, b)
-end
-
--- Pure calculation without the tooltip (testable)
-local function Calculate(sellPrice, listing, count, deposit, cut)
-  local vendor = sellPrice * count
-  local ahNet = math.floor(listing * count * (1 - cut / 100))
-  local gain = ahNet - vendor
-  local fails
-  if gain > 0 and deposit > 0 then
-    -- How often the auction may expire before the deposits eat up the profit
-    fails = math.floor(gain / deposit)
-  end
-  return vendor, ahNet, gain, fails
+  local lr, lg, lb = unpack(COLOR.label)
+  local r, g, b = unpack(color or COLOR.value)
+  tt:AddDoubleLine(INDENT .. left, right, lr, lg, lb, r, g, b)
 end
 
 local function AddLines(tt, bag, slot)
-  if not WorthListingDB or not WorthListingDB.show then return end
+  local db = WorthListingDB
+  if not db or not db.show then return end
   local link = GetBagLink(bag, slot)
   if not link then return end
   local market = GetMarketPrice(link)
-  if not market then return end
-  local sellPrice = select(11, GetInfo(link)) or 0
-  local count = GetBagCount(bag, slot)
-  count = (count and count > 0) and count or 1
+  -- Item data not loaded yet: show nothing rather than wrong numbers
+  local sellPrice = select(11, GetInfo(link))
+  if not market or not sellPrice then return end
+  local count = math.max(1, GetBagCount(bag, slot) or 1)
 
-  local deposit, source = GetDeposit(bag, slot, link, sellPrice, count)
+  local vendor = sellPrice * count
+  local deposit, source = GetDeposit(bag, slot, link, vendor, count)
   local listing = GetListingPrice(market)
-  local vendor, ahNet, gain, fails = Calculate(sellPrice, listing, count, deposit, WorthListingDB.cut)
+  local proceeds = math.floor(listing * count - PercentOf(listing * count, db.cut))
+  local gain = proceeds - vendor
 
   tt:AddLine(" ")
-  tt:AddLine(L.HEADER:format(ns.TITLE, count, WorthListingDB.hours), 1, 0.82, 0)
+  tt:AddLine(L.HEADER:format(ns.TITLE, count, db.hours), unpack(COLOR.warn))
   Line(tt, L.VENDOR, Money(vendor))
-  Line(tt, L.AUCTION:format(Money(listing)), Money(ahNet))
-  Line(tt, L.DEPOSIT:format(source), Money(deposit), GREY)
-  Line(tt, L.PROFIT_SOLD, Money(gain, true), gain > 0 and GREEN or RED)
-  Line(tt, L.LOSS_UNSOLD, Money(-deposit), deposit > 0 and RED or GREY)
+  Line(tt, L.AUCTION:format(Money(listing)), Money(proceeds))
+  Line(tt, L.DEPOSIT:format(source), Money(deposit), COLOR.muted)
+  Line(tt, L.PROFIT_SOLD, Money(gain, true), gain > 0 and COLOR.good or COLOR.bad)
+  Line(tt, L.LOSS_UNSOLD, Money(-deposit), deposit > 0 and COLOR.bad or COLOR.muted)
 
   if gain <= 0 then
-    Line(tt, L.VERDICT, L.VERDICT_VENDOR, RED)
-  elseif not fails then
-    Line(tt, L.BREAK_EVEN, L.UNLIMITED, GREEN)
+    Line(tt, L.VERDICT, L.VERDICT_VENDOR, COLOR.bad)
+  elseif deposit <= 0 then
+    Line(tt, L.BREAK_EVEN, L.UNLIMITED, COLOR.good)
   else
-    local color = fails >= 3 and GREEN or (fails >= 1 and YELLOW or RED)
+    -- How often the auction may expire before the deposits eat up the profit
+    local fails = math.floor(gain / deposit)
+    local color = fails >= SAFE_FAILS and COLOR.good or (fails >= 1 and COLOR.warn or COLOR.bad)
     Line(tt, L.BREAK_EVEN, tostring(fails), color)
   end
   tt:Show()
@@ -230,39 +248,62 @@ else
   hooksecurefunc(GameTooltip, "SetBagItem", AddLines)
 end
 
+-- Settings ------------------------------------------------------------------
+
+local function Copy(value)
+  return type(value) == "table" and CopyTable(value) or value
+end
+
+-- Sets a player-adjustable number within its limits; returns the stored value.
+-- "rate" means the deposit rate of the current duration.
+function ns.Set(key, value)
+  local low, high, whole = unpack(LIMITS[key])
+  value = math.min(high, math.max(low, value))
+  if whole then value = math.floor(value) end
+  if key == "rate" then
+    WorthListingDB.rates[WorthListingDB.hours] = value
+  else
+    WorthListingDB[key] = value
+  end
+  return value
+end
+
+function ns.SetHours(hours)
+  if not DURATION_INDEX[hours] then return false end
+  WorthListingDB.hours = hours
+  return true
+end
+
+-- Forget learned deposits; keeps the player's other settings
+function ns.ResetLearned()
+  for _, key in ipairs({ "deposits", "min", "rates" }) do
+    WorthListingDB[key] = Copy(defaults[key])
+  end
+end
+
+-- Everything back to defaults
+function ns.ResetAll()
+  for key, value in pairs(defaults) do
+    WorthListingDB[key] = Copy(value)
+  end
+end
+
 local function InitDB()
   WorthListingDB = WorthListingDB or {}
-  if (WorthListingDB.version or 1) < 2 then
-    -- Version 1 used 48h and a single rate
-    WorthListingDB.hours = nil
-    WorthListingDB.rate = nil
-  end
-  if (WorthListingDB.version or 1) < 3 then
+  local db = WorthListingDB
+  if (db.version or 0) < 3 then
     -- Up to version 2, Forever deposits were queried for 8h instead of 24h:
     -- saved deposits and learned rates are wrong
-    WorthListingDB.deposits = nil
-    WorthListingDB.rates = nil
+    db.deposits, db.rates = nil, nil
   end
-  for k, v in pairs(defaults) do
-    if WorthListingDB[k] == nil then
-      WorthListingDB[k] = type(v) == "table" and CopyTable(v) or v
-    end
+  for key, value in pairs(defaults) do
+    if db[key] == nil then db[key] = Copy(value) end
   end
-  if not DURATION_INDEX[WorthListingDB.hours] then
-    WorthListingDB.hours = defaults.hours
-  end
-  WorthListingDB.version = DB_VERSION
+  if not DURATION_INDEX[db.hours] then db.hours = defaults.hours end
+  db.version = DB_VERSION
 end
 
-local function ResetLearned()
-  WorthListingDB.deposits = {}
-  WorthListingDB.min = defaults.min
-  WorthListingDB.rates = CopyTable(defaults.rates)
-end
-
-ns.defaults = defaults
 ns.DURATIONS = DURATIONS
-ns.ResetLearned = ResetLearned
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
@@ -272,19 +313,27 @@ frame:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" and name == ADDON then
     InitDB()
     if ns.BuildOptions then ns.BuildOptions() end
-  elseif event == "AUCTION_HOUSE_SHOW" then
-    ahOpen = true
-  elseif event == "AUCTION_HOUSE_CLOSED" then
-    ahOpen = false
+  elseif event == "AUCTION_HOUSE_SHOW" or event == "AUCTION_HOUSE_CLOSED" then
+    ahOpen = event == "AUCTION_HOUSE_SHOW"
   end
 end)
 
-local function Print(msg)
+-- Chat ----------------------------------------------------------------------
+
+function ns.Print(msg)
   DEFAULT_CHAT_FRAME:AddMessage(("|cffffd100%s:|r %s"):format(ns.TITLE, msg))
 end
+local Print = ns.Print
 
 -- English commands, German ones kept as aliases
 local ALIASES = { gebuehr = "fee", anteil = "cut", stunden = "hours", an = "on", aus = "off" }
+
+-- Number commands: setting key and the message that confirms it
+local NUMBER_COMMANDS = {
+  fee = { "rate", function(v) return L.CHAT_FEE_SET:format(WorthListingDB.hours, v) end },
+  min = { "min", function(v) return L.CHAT_MIN_SET:format(Money(v)) end },
+  cut = { "cut", function(v) return L.CHAT_CUT_SET:format(v) end },
+}
 
 SLASH_WORTHLISTING1 = "/worthlisting"
 SLASH_WORTHLISTING2 = "/wl"
@@ -292,29 +341,22 @@ SlashCmdList.WORTHLISTING = function(input)
   local cmd, arg = strsplit(" ", (input or ""):lower(), 2)
   cmd = ALIASES[cmd] or cmd
   local num = tonumber(arg)
-  if cmd == "fee" and num then
-    WorthListingDB.rates[WorthListingDB.hours] = num
-    Print(L.CHAT_FEE_SET:format(WorthListingDB.hours, num))
-  elseif cmd == "min" and num then
-    WorthListingDB.min = num
-    Print(L.CHAT_MIN_SET:format(Money(num)))
-  elseif cmd == "cut" and num then
-    WorthListingDB.cut = num
-    Print(L.CHAT_CUT_SET:format(num))
-  elseif cmd == "hours" and DURATION_INDEX[num] then
-    WorthListingDB.hours = num
+  local numberCommand = NUMBER_COMMANDS[cmd]
+  if numberCommand and num then
+    Print(numberCommand[2](ns.Set(numberCommand[1], num)))
+  elseif cmd == "hours" and num and ns.SetHours(num) then
     Print(L.CHAT_HOURS_SET:format(num))
   elseif cmd == "reset" then
-    ResetLearned()
+    ns.ResetLearned()
     Print(L.CHAT_RESET)
   elseif cmd == "on" or cmd == "off" then
-    WorthListingDB.show = (cmd == "on")
+    WorthListingDB.show = cmd == "on"
     Print(WorthListingDB.show and L.CHAT_SHOW_ON or L.CHAT_SHOW_OFF)
   elseif cmd == "" and ns.OpenOptions and ns.OpenOptions() then
     return
   else
-    local rate = WorthListingDB.rates[WorthListingDB.hours] or 0
-    Print(L.CHAT_STATUS:format(WorthListingDB.hours, rate, Money(WorthListingDB.min), WorthListingDB.cut))
+    local db = WorthListingDB
+    Print(L.CHAT_STATUS:format(db.hours, db.rates[db.hours] or 0, Money(db.min), db.cut))
     Print(L.CHAT_UNDERCUT:format(ns.UndercutText()))
     Print(L.CHAT_HELP:format(SLASH_WORTHLISTING2, table.concat(DURATIONS, "|")))
   end

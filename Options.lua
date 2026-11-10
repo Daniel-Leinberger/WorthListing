@@ -3,6 +3,15 @@
 local ADDON, ns = ...
 local L = ns.L
 
+-- Layout (pixels)
+local MARGIN = 16          -- page edge
+local GAP_SMALL = -6       -- label -> its control
+local GAP_ROW = -16        -- between rows inside a section
+local GAP_FIELD = -40      -- label of the next number field (leaves room for the box above)
+local BUTTON_HEIGHT = 22
+local BUTTON_PADDING = 24  -- text width + padding = button width
+local BOX_HEIGHT = 20
+
 local page, category
 local widgets = {}
 
@@ -12,17 +21,13 @@ local function Refresh()
   local rate = db.rates[db.hours] or 0
 
   widgets.show:SetChecked(db.show)
-  for hours, button in pairs(widgets.hours) do
-    button:SetEnabled(db.hours ~= hours)
-  end
+  for hours, button in pairs(widgets.hours) do button:SetEnabled(db.hours ~= hours) end
+  for mode, button in pairs(widgets.modes) do button:SetEnabled(db.undercutMode ~= mode) end
   widgets.min:SetText(tostring(db.min))
   widgets.minMoney:SetText(ns.Money(db.min))
   widgets.rateLabel:SetText(L.OPT_RATE:format(db.hours))
   widgets.rate:SetText(("%.1f"):format(rate))
   widgets.cut:SetText(tostring(db.cut))
-  for mode, button in pairs(widgets.modes) do
-    button:SetEnabled(db.undercutMode ~= mode)
-  end
   widgets.undercutPercent:SetText(tostring(db.undercutPercent))
   widgets.undercutFixed:SetText(tostring(db.undercutFixed))
 
@@ -38,28 +43,27 @@ local function Refresh()
   }, "\n"))
 end
 
-local function Label(text, anchor, x, y, font)
+local function Label(text, anchor, y, font, x)
   local fs = page:CreateFontString(nil, "ARTWORK", font or "GameFontNormal")
-  fs:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", x or 0, y or -16)
+  fs:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", x or 0, y or GAP_ROW)
   fs:SetJustifyH("LEFT")
   fs:SetText(text)
   return fs
 end
 
--- Number field: takes the value on Enter or when the field loses focus
-local function NumberBox(anchor, width, onCommit)
+-- Number field for one setting (see ns.Set); takes the value on Enter or when it loses focus
+local function NumberBox(anchor, width, key)
   local box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
-  box:SetSize(width, 20)
+  box:SetSize(width, BOX_HEIGHT)
   box:SetAutoFocus(false)
-  box:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 6, -6)
-  local function commit(self)
+  box:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", -GAP_SMALL, GAP_SMALL)
+  box:SetScript("OnEnterPressed", box.ClearFocus)
+  box:SetScript("OnEscapePressed", box.ClearFocus)
+  box:SetScript("OnEditFocusLost", function(self)
     local num = tonumber((self:GetText():gsub(",", ".")))
-    if num and num >= 0 then onCommit(num) end
+    if num then ns.Set(key, num) end
     Refresh()
-  end
-  box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-  box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-  box:SetScript("OnEditFocusLost", commit)
+  end)
   return box
 end
 
@@ -67,10 +71,28 @@ end
 local function Button(text, minWidth, onClick)
   local b = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
   b:SetText(text)
-  local textWidth = b.GetTextWidth and b:GetTextWidth()
-  b:SetSize(math.max(minWidth, (textWidth or 0) + 24), 22)
+  local textWidth = b.GetTextWidth and b:GetTextWidth() or 0
+  b:SetSize(math.max(minWidth, textWidth + BUTTON_PADDING), BUTTON_HEIGHT)
   b:SetScript("OnClick", function() onClick() Refresh() end)
   return b
+end
+
+-- Row of buttons below a label; entries are { value, text, minWidth }.
+-- Returns value -> button and the first button (to anchor what follows).
+local function ButtonRow(label, entries, onClick)
+  local buttons, first, prev = {}, nil, nil
+  for _, entry in ipairs(entries) do
+    local value = entry[1]
+    local b = Button(entry[2], entry[3], function() onClick(value) end)
+    if prev then
+      b:SetPoint("LEFT", prev, "RIGHT", -GAP_SMALL, 0)
+    else
+      b:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, GAP_SMALL)
+      first = b
+    end
+    buttons[value], prev = b, b
+  end
+  return buttons, first
 end
 
 local function Build()
@@ -78,9 +100,9 @@ local function Build()
   page:Hide()
 
   local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", 16, -16)
+  title:SetPoint("TOPLEFT", MARGIN, -MARGIN)
   title:SetText(ns.TITLE)
-  local sub = Label(L.OPT_SUBTITLE, title, 0, -8, "GameFontHighlightSmall")
+  local sub = Label(L.OPT_SUBTITLE, title, -8, "GameFontHighlightSmall")
 
   -- Show in tooltip
   local show = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
@@ -92,85 +114,55 @@ local function Build()
   widgets.show = show
 
   -- Duration
-  local hoursLabel = Label(L.OPT_DURATION, show, 4, -14)
-  widgets.hours = {}
-  local prev
-  for _, hours in ipairs(ns.DURATIONS) do
-    local b = Button(hours .. "h", 60, function() WorthListingDB.hours = hours end)
-    if prev then
-      b:SetPoint("LEFT", prev, "RIGHT", 6, 0)
-    else
-      b:SetPoint("TOPLEFT", hoursLabel, "BOTTOMLEFT", 0, -6)
-    end
-    widgets.hours[hours] = b
-    prev = b
-  end
+  local hoursLabel = Label(L.OPT_DURATION, show, -14, nil, 4) -- undo the checkbox's -4 offset
+  local hourEntries = {}
+  for _, hours in ipairs(ns.DURATIONS) do hourEntries[#hourEntries + 1] = { hours, hours .. "h", 60 } end
+  local firstHour
+  widgets.hours, firstHour = ButtonRow(hoursLabel, hourEntries, ns.SetHours)
 
-  -- Minimum deposit
-  local minLabel = Label(L.OPT_MIN, widgets.hours[ns.DURATIONS[1]], 0, -18)
-  widgets.min = NumberBox(minLabel, 80, function(num) WorthListingDB.min = math.floor(num) end)
+  -- Deposit
+  local minLabel = Label(L.OPT_MIN, firstHour, -18)
+  widgets.min = NumberBox(minLabel, 80, "min")
   widgets.minMoney = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   widgets.minMoney:SetPoint("LEFT", widgets.min, "RIGHT", 10, 0)
 
-  -- Deposit rate
-  widgets.rateLabel = Label("", minLabel, 0, -40)
-  widgets.rate = NumberBox(widgets.rateLabel, 80, function(num) WorthListingDB.rates[WorthListingDB.hours] = num end)
+  widgets.rateLabel = Label("", minLabel, GAP_FIELD)
+  widgets.rate = NumberBox(widgets.rateLabel, 80, "rate")
 
-  -- AH cut
-  local cutLabel = Label(L.OPT_CUT, widgets.rateLabel, 0, -40)
-  widgets.cut = NumberBox(cutLabel, 80, function(num) WorthListingDB.cut = num end)
+  local cutLabel = Label(L.OPT_CUT, widgets.rateLabel, GAP_FIELD)
+  widgets.cut = NumberBox(cutLabel, 80, "cut")
 
   -- Undercut
-  local undercutLabel = Label(L.OPT_UNDERCUT, cutLabel, 0, -40)
-  widgets.modes = {}
-  prev = nil
-  for _, entry in ipairs({
+  local undercutLabel = Label(L.OPT_UNDERCUT, cutLabel, GAP_FIELD)
+  local firstMode
+  widgets.modes, firstMode = ButtonRow(undercutLabel, {
     { "auctionator", L.MODE_AUCTIONATOR, 120 },
     { "percent", L.MODE_PERCENT, 80 },
     { "fixed", L.MODE_FIXED, 80 },
     { "none", L.MODE_NONE, 50 },
-  }) do
-    local mode = entry[1]
-    local b = Button(entry[2], entry[3], function() WorthListingDB.undercutMode = mode end)
-    if prev then
-      b:SetPoint("LEFT", prev, "RIGHT", 6, 0)
-    else
-      b:SetPoint("TOPLEFT", undercutLabel, "BOTTOMLEFT", 0, -6)
-    end
-    widgets.modes[mode] = b
-    prev = b
-  end
+  }, function(mode) WorthListingDB.undercutMode = mode end)
 
-  local percentLabel = Label(L.OPT_PERCENT, widgets.modes.auctionator, 0, -12, "GameFontHighlightSmall")
-  widgets.undercutPercent = NumberBox(percentLabel, 60, function(num) WorthListingDB.undercutPercent = math.min(num, 99) end)
-  local fixedLabel = Label(L.OPT_FIXED, percentLabel, 0, 0, "GameFontHighlightSmall")
-  fixedLabel:ClearAllPoints()
+  local percentLabel = Label(L.OPT_PERCENT, firstMode, -12, "GameFontHighlightSmall")
+  widgets.undercutPercent = NumberBox(percentLabel, 60, "undercutPercent")
+  local fixedLabel = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   fixedLabel:SetPoint("LEFT", percentLabel, "LEFT", 160, 0)
-  widgets.undercutFixed = NumberBox(fixedLabel, 60, function(num) WorthListingDB.undercutFixed = math.floor(num) end)
+  fixedLabel:SetText(L.OPT_FIXED)
+  widgets.undercutFixed = NumberBox(fixedLabel, 60, "undercutFixed")
 
-  local hint = Label(L.OPT_HINT, percentLabel, 0, -40, "GameFontDisableSmall")
+  local hint = Label(L.OPT_HINT, percentLabel, GAP_FIELD, "GameFontDisableSmall")
 
   -- Current state
-  local statusTitle = Label(L.OPT_STATUS, hint, 0, -20)
-  widgets.status = Label("", statusTitle, 0, -8, "GameFontHighlight")
+  local statusTitle = Label(L.OPT_STATUS, hint, -20)
+  widgets.status = Label("", statusTitle, -8, "GameFontHighlight")
   widgets.status:SetSpacing(4)
 
-  local reset = Button(L.OPT_RESET, 240, function() ns.ResetLearned() end)
-  reset:SetPoint("TOPLEFT", widgets.status, "BOTTOMLEFT", 0, -16)
+  local reset = Button(L.OPT_RESET, 240, ns.ResetLearned)
+  reset:SetPoint("TOPLEFT", widgets.status, "BOTTOMLEFT", 0, GAP_ROW)
 
   page:SetScript("OnShow", Refresh)
   page.OnCommit = function() end
   page.OnRefresh = Refresh
-  page.OnDefault = function()
-    ns.ResetLearned()
-    WorthListingDB.hours = ns.defaults.hours
-    WorthListingDB.cut = ns.defaults.cut
-    WorthListingDB.show = ns.defaults.show
-    WorthListingDB.undercutMode = ns.defaults.undercutMode
-    WorthListingDB.undercutPercent = ns.defaults.undercutPercent
-    WorthListingDB.undercutFixed = ns.defaults.undercutFixed
-    Refresh()
-  end
+  page.OnDefault = function() ns.ResetAll() Refresh() end
 
   if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
     category = Settings.RegisterCanvasLayoutCategory(page, ns.TITLE)
@@ -184,15 +176,12 @@ end
 function ns.BuildOptions()
   if page then return end
   local ok, err = pcall(Build)
-  if not ok then
-    DEFAULT_CHAT_FRAME:AddMessage(("|cffffd100%s:|r "):format(ns.TITLE) .. L.OPT_BUILD_ERROR:format(tostring(err)))
-  end
+  if not ok then ns.Print(L.OPT_BUILD_ERROR:format(tostring(err))) end
 end
 
 -- Opens the page; returns false if that is not possible (then /wl prints the state in chat)
 function ns.OpenOptions()
   if not category or not Settings or not Settings.OpenToCategory then return false end
   local id = category.GetID and category:GetID() or category.ID
-  local ok = pcall(Settings.OpenToCategory, id)
-  return ok
+  return (pcall(Settings.OpenToCategory, id))
 end
