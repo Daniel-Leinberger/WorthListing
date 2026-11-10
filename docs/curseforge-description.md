@@ -37,7 +37,8 @@ Worth Listing (stack of 11, 24h)
 
 ## Features
 
-- Calculates the **whole stack**, no more mental math, in your bags and in **Auctionator's selling list**
+- Calculates the **whole stack**, no more mental math
+- Shows in **every item tooltip**: bags, bank, auction house and Auctionator, merchant, loot, quest rewards, mail, trade, chat links and more. Turn each place on or off in the options
 - Uses **your real listing price**: undercut the same way as Auctionator, by percent, by a fixed amount, or not at all
 - Reads the **exact deposits** of all your bag items automatically when you open the auction house and remembers them
 - **Learns** the minimum deposit and the deposit rate by itself, so it keeps up when Blizzard changes them

@@ -5,7 +5,8 @@
 - Options page reorganized: everyday settings (duration, undercut) first, fee settings below in a new "Advanced: fees" section
 - Every fee setting now explains what it means and when you should change it
 - Opening the auction house now reads the exact deposits of all bag items for every duration, no need to hover each item; bag changes while it is open are picked up too
-- The tooltip block now also shows in Auctionator's selling list, for the total amount Auctionator would post
+- The tooltip block now shows in every item tooltip: bags, bank, equipped items, auction house (incl. Auctionator's lists, using the total amount Auctionator would post), merchant, loot, quest rewards, mail, trade, professions, chat links and other add-ons. Where the amount is unknown it calculates with one item
+- New "Where to show" section with a checkbox per tooltip type plus "All on", "All off" and "Default"; comparison tooltips are off by default
 
 ## v1.0.2
 

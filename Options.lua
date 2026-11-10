@@ -14,6 +14,8 @@ local BOX_HEIGHT = 20
 local SCROLLBAR_SPACE = 28 -- room on the right for the scroll bar
 local TEXT_WIDTH = 520     -- explanations wrap at this width
 local GAP_SECTION = -28    -- before a new section heading
+local CHECK_ROW = 24       -- height of one checkbox row
+local CHECK_COLUMN = 270   -- left edge of the second checkbox column
 
 local page, content, scroll, category
 local widgets = {}
@@ -24,6 +26,7 @@ local function Refresh()
   local rate = db.rates[db.hours] or 0
 
   widgets.show:SetChecked(db.show)
+  for key, box in pairs(widgets.tooltips) do box:SetChecked(db.tooltips[key]) end
   for hours, button in pairs(widgets.hours) do button:SetEnabled(db.hours ~= hours) end
   for mode, button in pairs(widgets.modes) do button:SetEnabled(db.undercutMode ~= mode) end
   widgets.min:SetText(tostring(db.min))
@@ -78,6 +81,16 @@ local function NumberBox(anchor, width, key)
     if num then ns.Set(key, num) end
     Refresh()
   end)
+  return box
+end
+
+-- Checkbox with a label to its right
+local function Checkbox(text, onClick)
+  local box = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+  box:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
+  local label = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  label:SetPoint("LEFT", box, "RIGHT", 4, 0)
+  label:SetText(text)
   return box
 end
 
@@ -143,13 +156,9 @@ local function Build()
   title:SetText(ns.TITLE)
   local sub = Label(L.OPT_SUBTITLE, title, -8, "GameFontHighlightSmall")
 
-  -- Show in tooltip
-  local show = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+  -- Main switch
+  local show = Checkbox(L.OPT_SHOW, function(on) WorthListingDB.show = on end)
   show:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", -4, -14)
-  show:SetScript("OnClick", function(self) WorthListingDB.show = self:GetChecked() and true or false end)
-  local showText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-  showText:SetPoint("LEFT", show, "RIGHT", 4, 0)
-  showText:SetText(L.OPT_SHOW)
   widgets.show = show
 
   -- Duration
@@ -176,8 +185,30 @@ local function Build()
   fixedLabel:SetText(L.OPT_FIXED)
   widgets.undercutFixed = NumberBox(fixedLabel, 60, "undercutFixed")
 
+  -- Where to show the block: one checkbox per tooltip type, two columns
+  local whereLabel = Label(L.OPT_WHERE, percentLabel, GAP_FIELD + GAP_SECTION, "GameFontNormalLarge")
+  local whereHint = Description(L.OPT_WHERE_HINT, whereLabel, -6)
+  widgets.tooltips = {}
+  local rows = math.ceil(#ns.TOOLTIP_TYPES / 2)
+  for i, key in ipairs(ns.TOOLTIP_TYPES) do
+    local box = Checkbox(L["TT_" .. key:upper()], function(on) WorthListingDB.tooltips[key] = on end)
+    local column, row = math.floor((i - 1) / rows), (i - 1) % rows
+    box:SetPoint("TOPLEFT", whereHint, "BOTTOMLEFT", -4 + column * CHECK_COLUMN, -8 - row * CHECK_ROW)
+    widgets.tooltips[key] = box
+  end
+  local lastRow = widgets.tooltips[ns.TOOLTIP_TYPES[rows]]
+  local spacer = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  spacer:SetPoint("TOPLEFT", lastRow, "BOTTOMLEFT", 4, 0)
+  local _, firstWhere = ButtonRow(spacer, {
+    { true, L.OPT_ALL_ON, 80 },
+    { false, L.OPT_ALL_OFF, 80 },
+    { "default", L.OPT_DEFAULT, 80 },
+  }, function(value)
+    if value == "default" then ns.ResetTooltips() else ns.SetAllTooltips(value) end
+  end)
+
   -- Advanced: fees (learned automatically, normally left alone)
-  local advanced = Label(L.OPT_ADVANCED, percentLabel, GAP_FIELD + GAP_SECTION, "GameFontNormalLarge")
+  local advanced = Label(L.OPT_ADVANCED, firstWhere, GAP_SECTION, "GameFontNormalLarge")
   local advancedHint = Description(L.OPT_ADVANCED_HINT, advanced, -6)
 
   local _, minDesc = Field(advancedHint, GAP_ROW, L.OPT_MIN, L.OPT_MIN_DESC, "min")

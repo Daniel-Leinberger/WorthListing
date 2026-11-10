@@ -27,6 +27,15 @@ local DEFAULT_RATES = IS_FOREVER and { [2] = 5, [8] = 20, [24] = 60 }
 local DURATION_INDEX = {}
 for index, hours in ipairs(DURATIONS) do DURATION_INDEX[hours] = index end
 
+-- Where the block can show up; the options page lists them in this order.
+-- Comparison tooltips (equipped items next to the hovered one) are off by default.
+ns.TOOLTIP_TYPES = {
+  "bags", "bank", "character", "auction", "merchant", "loot", "quest",
+  "mail", "trade", "crafting", "chat", "other", "comparison",
+}
+local DEFAULT_TOOLTIPS = {}
+for _, key in ipairs(ns.TOOLTIP_TYPES) do DEFAULT_TOOLTIPS[key] = key ~= "comparison" end
+
 local defaults = {
   cut = 5,                      -- share the AH keeps on sale, in %
   hours = 24,                   -- auction duration
@@ -36,7 +45,8 @@ local defaults = {
   undercutMode = "auctionator", -- "auctionator", "percent", "fixed" or "none"
   undercutPercent = 5,          -- undercut by x % (mode "percent")
   undercutFixed = 1,            -- undercut by x copper per item (mode "fixed")
-  show = true,
+  show = true,                  -- main switch
+  tooltips = DEFAULT_TOOLTIPS,  -- tooltip type -> show the block there
 }
 
 -- Allowed range for every number the player can set (chat and options page)
@@ -126,7 +136,7 @@ end
 -- Exact deposit from the game (only works while the auction house is open)
 local function QueryDeposit(bag, slot, itemID, count, hours)
   local duration = DURATION_INDEX[hours]
-  if not ahOpen or not duration or not C_AuctionHouse or not ItemLocation then return end
+  if not bag or not ahOpen or not duration or not C_AuctionHouse or not ItemLocation then return end
   local ok, deposit = pcall(function()
     local location = ItemLocation:CreateFromBagAndSlot(bag, slot)
     if not C_Item.DoesItemExist(location) then return end
@@ -240,7 +250,7 @@ local function AddLines(tt, link, count, bag, slot)
   -- Item data not loaded yet: show nothing rather than wrong numbers
   local sellPrice = select(11, GetInfo(link))
   if not market or not sellPrice then return end
-  count = math.max(1, count or 1)
+  count = math.max(1, tonumber(count) or 1)
 
   local vendor = sellPrice * count
   local deposit, source = GetDeposit(bag, slot, link, vendor, count)
@@ -269,34 +279,115 @@ local function AddLines(tt, link, count, bag, slot)
   tt:Show()
 end
 
-local function OnBagItem(tt, bag, slot)
-  AddLines(tt, GetBagLink(bag, slot), GetBagCount(bag, slot), bag, slot)
+-- Tooltip types ---------------------------------------------------------------
+
+local LAST_EQUIPPED_SLOT = INVSLOT_LAST_EQUIPPED or 19
+local BANK_CONTAINER = BANK_CONTAINER or -1
+
+-- Only the game's visible tooltips. Other add-ons read hidden tooltips to scan
+-- item texts; extra lines there could break them.
+local TOOLTIPS = {
+  GameTooltip = "main", ItemRefTooltip = "chat",
+  ShoppingTooltip1 = "comparison", ShoppingTooltip2 = "comparison",
+  ItemRefShoppingTooltip1 = "comparison", ItemRefShoppingTooltip2 = "comparison",
+}
+
+local function BagType(bag)
+  return (bag == BANK_CONTAINER or bag > LAST_BAG) and "bank" or "bags"
 end
 
--- Auctionator's selling list shows its items via SetHyperlink. Its item buttons carry
--- the link, the total count in your bags and the bag locations; other links (chat etc.)
--- have no stack to calculate with and are ignored.
-local function OnLinkItem(tt)
-  local owner = tt:GetOwner()
+-- Tooltip function -> type, and how to read the amount from its arguments
+local GETTERS = {
+  GetInventoryItem = { function(_, slot) return slot > LAST_EQUIPPED_SLOT and "bank" or "character" end,
+    function(unit, slot) return GetInventoryItemCount(unit, slot) end },
+  GetMerchantItem = { "merchant", function(i)
+    if GetMerchantItemInfo then return select(4, GetMerchantItemInfo(i)) end
+    return C_MerchantFrame.GetItemInfo(i).stackCount
+  end },
+  GetBuybackItem = { "merchant", function(i) return select(4, GetBuybackItemInfo(i)) end },
+  GetLootItem = { "loot", function(i) return select(3, GetLootSlotInfo(i)) end },
+  GetLootRollItem = { "loot", function(id) return select(3, GetLootRollItemInfo(id)) end },
+  GetQuestItem = { "quest", function(kind, i) return select(3, GetQuestItemInfo(kind, i)) end },
+  GetQuestLogItem = { "quest", function(kind, i)
+    return select(3, (kind == "choice" and GetQuestLogChoiceInfo or GetQuestLogRewardInfo)(i))
+  end },
+  GetInboxItem = { "mail", function(m, a) return select(4, GetInboxItem(m, a)) end },
+  GetSendMailItem = { "mail", function(i) return select(4, GetSendMailItem(i)) end },
+  GetTradePlayerItem = { "trade", function(i) return select(3, GetTradePlayerItemInfo(i)) end },
+  GetTradeTargetItem = { "trade", function(i) return select(3, GetTradeTargetItemInfo(i)) end },
+  GetItemKey = { "auction" }, GetAuctionItem = { "auction" }, GetOwnedAuctionItem = { "auction" },
+  GetRecipeReagentItem = { "crafting" }, GetRecipeResultItem = { "crafting" },
+  GetTradeSkillItem = { "crafting" }, GetTradeSkillReagentItem = { "crafting" }, GetCraftItem = { "crafting" },
+}
+
+local function SafeCall(fn, ...)
+  if not fn then return end
+  local ok, a, b = pcall(fn, ...)
+  if ok then return a, b end
+end
+
+-- Auctionator's item buttons carry the total count in the bags and the bag locations
+local function AuctionatorItem(owner)
   local item = owner and owner.itemInfo
   local location = type(item) == "table" and type(item.locations) == "table" and item.locations[1]
-  if not location or not item.itemLink then return end
-  local ok, bag, slot = pcall(location.GetBagAndSlot, location)
-  if ok and bag then AddLines(tt, item.itemLink, item.itemCount, bag, slot) end
+  if not location then return end
+  local bag, slot = SafeCall(location.GetBagAndSlot, location)
+  if bag then return item.itemCount, bag, slot end
+end
+
+-- True if `frame` lies somewhere inside `container` (e.g. a list row inside the auction house)
+local function IsInside(frame, container)
+  for _ = 1, 20 do -- UI trees are shallow; the limit guards against odd parent loops
+    if not frame or not container then return false end
+    if frame == container then return true end
+    frame = SafeCall(frame.GetParent, frame)
+  end
+  return false
+end
+
+-- Works out what the tooltip shows: type, link, count and (for bag items) bag and slot.
+-- Unknown amounts count as 1.
+local function Describe(tt, getter, args)
+  if getter == "GetBagItem" then
+    local bag, slot = args[1], args[2]
+    return BagType(bag), GetBagLink(bag, slot), GetBagCount(bag, slot), bag, slot
+  end
+  local link = select(2, SafeCall(tt.GetItem, tt))
+  if not link then return end
+  if getter == "GetHyperlink" then
+    local owner = SafeCall(tt.GetOwner, tt)
+    local count, bag, slot = AuctionatorItem(owner)
+    if bag then return "auction", link, count, bag, slot end
+    if TOOLTIPS[tt:GetName() or ""] == "chat" then return "chat", link, 1 end
+    return IsInside(owner, AuctionHouseFrame) and "auction" or "other", link, 1
+  end
+  local entry = GETTERS[getter]
+  if not entry then return "other", link, 1 end
+  local kind = entry[1]
+  if type(kind) == "function" then kind = SafeCall(kind, unpack(args)) or "other" end
+  return kind, link, SafeCall(entry[2], unpack(args)) or 1
+end
+
+local function OnItemTooltip(tt, getter, args)
+  local db = WorthListingDB
+  if not db or not db.show or tt:IsForbidden() then return end
+  local frameType = TOOLTIPS[tt:GetName() or ""]
+  if not frameType then return end
+  local kind, link, count, bag, slot = Describe(tt, getter, args or {})
+  if frameType == "comparison" then kind = "comparison" end
+  if kind and db.tooltips[kind] then AddLines(tt, link, count, bag, slot) end
 end
 
 if TooltipDataProcessor and C_TooltipInfo then
-  -- Modern tooltip path: also survives the tooltip being rebuilt
-  local HANDLERS = { GetBagItem = OnBagItem, GetHyperlink = OnLinkItem }
+  -- One hook for every item tooltip; also survives the tooltip being rebuilt
   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tt)
-    if tt ~= GameTooltip then return end
     local info = tt.info or tt.processingInfo
-    local handler = info and not info.excludeLines and HANDLERS[info.getterName]
-    if handler then handler(tt, unpack(info.getterArgs or {})) end
+    if info and not info.excludeLines then OnItemTooltip(tt, info.getterName, info.getterArgs) end
   end)
 else
-  hooksecurefunc(GameTooltip, "SetBagItem", OnBagItem)
-  hooksecurefunc(GameTooltip, "SetHyperlink", OnLinkItem)
+  -- Older clients: bags and links only
+  hooksecurefunc(GameTooltip, "SetBagItem", function(tt, bag, slot) OnItemTooltip(tt, "GetBagItem", { bag, slot }) end)
+  hooksecurefunc(GameTooltip, "SetHyperlink", function(tt) OnItemTooltip(tt, "GetHyperlink", {}) end)
 end
 
 -- Settings ------------------------------------------------------------------
@@ -332,6 +423,14 @@ function ns.ResetLearned()
   end
 end
 
+function ns.SetAllTooltips(on)
+  for _, key in ipairs(ns.TOOLTIP_TYPES) do WorthListingDB.tooltips[key] = on end
+end
+
+function ns.ResetTooltips()
+  WorthListingDB.tooltips = Copy(DEFAULT_TOOLTIPS)
+end
+
 -- Everything back to defaults
 function ns.ResetAll()
   for key, value in pairs(defaults) do
@@ -348,7 +447,14 @@ local function InitDB()
     db.deposits, db.rates = nil, nil
   end
   for key, value in pairs(defaults) do
-    if db[key] == nil then db[key] = Copy(value) end
+    if db[key] == nil then
+      db[key] = Copy(value)
+    elseif type(value) == "table" then
+      -- new entries in a table default (e.g. a new tooltip type)
+      for subKey, subValue in pairs(value) do
+        if db[key][subKey] == nil then db[key][subKey] = subValue end
+      end
+    end
   end
   if not DURATION_INDEX[db.hours] then db.hours = defaults.hours end
   db.version = DB_VERSION
