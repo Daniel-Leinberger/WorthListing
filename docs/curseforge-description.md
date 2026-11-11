@@ -12,6 +12,8 @@ Shows in the tooltip whether a stack is worth listing at the auction house, afte
 
 **Is this stack worth listing, or should I just vendor it?**
 
+Made for **WoW Forever**.
+
 You know the feeling: the auction house shows a slightly higher price than the vendor, you list the item, someone undercuts you, the auction expires, and your deposit is gone. Do that twice and you would have been better off at the vendor.
 
 **Worth Listing** answers that question right in the item tooltip, for the whole stack under your mouse.
@@ -33,21 +35,21 @@ Worth Listing (stack of 11, 24h)
 - **Deposit**: the listing fee for this stack. *live* = exact value from the game, *saved* = remembered from your last auction house visit, *estimated* = calculated
 - **Profit if sold**: how much more you get than from the vendor
 - **Loss if unsold**: the deposit you lose if the auction expires
-- **Break-even: failed attempts**: how often the auction may expire before the lost deposits have eaten your extra profit. **0** (red) means one failed auction already makes it worse than vendoring. If the auction house pays less than the vendor anyway, it simply says **Vendor it!**
+- **Break-even: failed attempts**: how often the auction may expire before the lost deposits have eaten your extra profit. **0** (red) means one failed auction already makes it worse than vendoring, **1–2** is yellow, **3 or more** green. If the auction house pays less than the vendor anyway, it simply says **Vendor it!**
 
 ## Features
 
 - Calculates the **whole stack**, no more mental math
-- Shows in **every item tooltip**: bags, bank, auction house and Auctionator, merchant, loot, quest rewards, mail, trade, chat links and more. Turn each place on or off in the options
+- Shows in **every item tooltip**: bags, bank, auction house and Auctionator, merchant, loot, quest rewards, mail, trade, chat links and more. Turn each place on or off in the options. Where the amount is unknown (e.g. chat links), it calculates with one item
 - Uses **your real listing price**: undercut the same way as Auctionator, by percent, by a fixed amount, or not at all
 - Reads the **exact deposits** of all your bag items automatically when you open the auction house and remembers them
 - **Learns** the minimum deposit and the deposit rate by itself, so it keeps up when Blizzard changes them
-- Options page under **Options → AddOns → Worth Listing**, or type **/wl**
+- Options page under **Options → AddOns → Worth Listing** (or type **/wl**), with every setting explained
 - **English and German**, more languages welcome
 
 ## Requirements
 
-Prices come from **Auctionator** (recommended); Auctioneer is supported as a fallback. Scan the auction house once so prices are available.
+Prices come from **Auctionator**. Scan the auction house once so prices are available. If Auctionator is missing, Worth Listing falls back to Auctioneer; that path has not been tested in the game yet.
 
 **Tip:** open the auction house once. Worth Listing reads the exact deposits of everything in your bags, so it knows them even after you close the auction house.
 
@@ -57,6 +59,8 @@ Prices come from **Auctionator** (recommended); Auctioneer is supported as a fal
 - **/wl status**: print the current settings
 - **/wl hours 24**: auction duration (2, 8 or 24 on WoW Forever)
 - **/wl min &lt;copper&gt;**: minimum deposit
+- **/wl fee &lt;percent&gt;**: deposit in % of vendor price
+- **/wl cut &lt;percent&gt;**: AH cut on sale
 - **/wl reset**: forget saved deposits
 - **/wl on** / **/wl off**: show or hide the tooltip block
 
